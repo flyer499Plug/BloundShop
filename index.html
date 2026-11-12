@@ -147,7 +147,7 @@
    ============================================================ */
 const CONFIG = {
   // Ваш юзернейм в Telegram БЕЗ значка @
-  SELLER_USERNAME: "k3n50CEO",
+  SELLER_USERNAME: "k3n5oCEO",
 
   // Ссылка на опубликованную Google Таблицу в формате CSV (см. инструкцию).
   // Пока пусто — показываются демо-товары.
@@ -184,6 +184,9 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
 function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const first = text.split(/\r?\n/)[0] || "";
+  const SEP = (first.split(";").length > first.split(",").length) ? ";" : ",";
   const rows = []; let row = [], cur = "", q = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
@@ -192,7 +195,7 @@ function parseCSV(text) {
       else if (c === '"') q = false;
       else cur += c;
     } else if (c === '"') q = true;
-    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === SEP) { row.push(cur); cur = ""; }
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && text[i+1] === "\n") i++;
       row.push(cur); cur = ""; rows.push(row); row = [];
@@ -205,10 +208,11 @@ function parseCSV(text) {
 function rowsToItems(rows) {
   if (!rows.length) return [];
   const head = rows[0].map(h => h.trim().toLowerCase());
-  const idx = (...names) => { for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
-  const iName = idx("название", "name"), iPrice = idx("цена", "price"), iSizes = idx("размеры", "размер", "sizes"),
-        iPhoto = idx("фото", "photo", "photos"), iStock = idx("наличие", "в наличии", "stock"),
-        iDesc = idx("описание", "description");
+  const idx = (...names) => head.findIndex(h => names.some(n => h.includes(n)));
+  const iName = idx("назван", "наименован", "товар", "name"), iPrice = idx("цена", "price"),
+        iSizes = idx("размер", "size"), iPhoto = idx("фото", "photo"),
+        iStock = idx("налич", "stock"), iDesc = idx("описан", "desc");
+  if (iName < 0) throw new Error("Не найден столбец «название». Прочитаны заголовки: " + rows[0].join(" | ").slice(0, 150));
   return rows.slice(1).map(r => ({
     название: r[iName] || "", цена: r[iPrice] || "", размеры: r[iSizes] || "",
     фото: r[iPhoto] || "", наличие: r[iStock] || "", описание: r[iDesc] || ""
@@ -327,13 +331,16 @@ async function load() {
       const sep = CONFIG.SHEET_CSV_URL.includes("?") ? "&" : "?";
       const res = await fetch(CONFIG.SHEET_CSV_URL + sep + "t=" + Date.now(), { cache: "no-store" });
       if (!res.ok) throw new Error("HTTP " + res.status);
-      raw = rowsToItems(parseCSV(await res.text()));
+      const text = await res.text();
+      if (/^\s*<(!doctype|html)/i.test(text)) throw new Error("Ссылка ведёт на веб-страницу, а не на CSV. Опубликуйте лист в формате CSV.");
+      raw = rowsToItems(parseCSV(text));
+      if (!raw.length) throw new Error("Таблица прочитана, но в ней нет строк с товарами.");
     } else raw = DEMO;
     items = raw.map(normalize);
     render();
   } catch (err) {
     console.error(err);
-    if (!items.length) { $("state").style.display = "block"; $("state").textContent = "Не удалось загрузить каталог. Попробуйте позже."; }
+    if (!items.length) { $("state").style.display = "block"; $("state").textContent = "Не удалось загрузить каталог: " + (err && err.message ? err.message : "ошибка сети"); }
   }
 }
 load();
